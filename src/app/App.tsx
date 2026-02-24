@@ -8,6 +8,7 @@ import { EmailPromptCard } from '@/app/components/EmailPromptCard';
 import { LoadingCard } from '@/app/components/LoadingCard';
 import { ProductsLoadingState } from '@/app/components/ProductsLoadingState';
 import { Logo } from '@/app/components/Logo';
+import axios from 'axios';
 
 // 1. Import our Remote Control functions
 import { fetchProducts, trackProduct, deleteProduct, submitEmail } from '../api';
@@ -62,7 +63,28 @@ function App() {
         
       } catch (error) {
         console.error("Failed to load products", error);
-        toast.error("Could not connect to server. Is the backend running?");
+        
+        // 1. Check if the server responded, but gave an error code
+        if (axios.isAxiosError(error)){
+          if (error.response) {
+              if (error.response.status === 429) {
+                  // The 429 Rate Limit was successfully caught!
+                  toast.error("You are requesting too quickly! Please wait a moment.");
+              } else {
+                  // Other server errors (like 500 Internal Server Error)
+                  const errorMsg = error.response.data?.detail || "Something went wrong on the server.";
+                  toast.error(`Error: ${errorMsg}`);
+              }
+          }
+          // 2. Check if the server actually failed to respond entirely (Hugging Face is asleep/down)
+          else if (error.request) {
+              toast.error("Could not connect to server. Is the backend running?");
+          } 
+        }
+        // 3. Fallback for completely unknown frontend errors
+        else {
+            toast.error("An unexpected error occurred.");
+        }
       } finally {
         setIsLoading(false);
       }
@@ -71,7 +93,7 @@ function App() {
     loadData();
   }, []);
 
-  // 4. REAL Add Product Logic
+// 4. REAL Add Product Logic
   const handleAddProduct = async (url: string) => {
     try {
       setIsScraping(true);
@@ -79,13 +101,22 @@ function App() {
       const newTrackingData = await trackProduct(url);
       
       const newProduct = mapBackendToFrontend(newTrackingData);
+      
+      // Step 1: Add the new product to the list
       setProducts(prev => [newProduct, ...prev]);
+      
+      // --- THE FIX IS HERE ---
+      // Step 2: Immediate Check. 
+      // "If the user hasn't saved an email yet, show the popup NOW."
+      if (!userEmail) {
+        setShowEmailPrompt(true);
+      }
+      // -----------------------
       
       toast.success("Product tracked successfully!");
       
     } catch (error: any) {
       console.error("Add failed", error);
-      // Show specific error messages from backend (like "Already tracking")
       const msg = error.response?.data?.detail || "Failed to track product.";
       toast.error(msg);
     } finally {
